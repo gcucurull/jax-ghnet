@@ -44,10 +44,12 @@ if __name__ == "__main__":
     num_epochs = 200
     n_nodes = adj_1.shape[0]
     n_feats = features.shape[1]
+    infusion = 'inner'
 
     init_fun, predict_fun = GHNet(nhid=hidden, 
                                 nclass=labels.shape[1],
-                                dropout=dropout)
+                                dropout=dropout,
+                                infusion=infusion)
     input_shape = (-1, n_nodes, n_feats)
     rng_key, init_key = random.split(rng_key)
     _, init_params = init_fun(init_key, input_shape)

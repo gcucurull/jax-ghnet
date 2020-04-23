@@ -36,7 +36,8 @@ def Dropout(rate):
     return init_fun, apply_fun
 
 
-def GraphHighwayConvolution(out_dim: int, infusion: str = 'inner'):
+def GraphHighwayConvolution(out_dim: int, orig_n_features: int, 
+                            infusion: str = 'inner'):
     """
     Layer constructor function for a Graph Highway Convolution layer as the 
     one proposed in https://arxiv.org/abs/2004.04635 
@@ -47,40 +48,42 @@ def GraphHighwayConvolution(out_dim: int, infusion: str = 'inner'):
         output_shape = input_shape[:-1] + (out_dim,)
         k1, k2, k3, k4, k5 = random.split(rng, num=5)
         stdv = 1. / math.sqrt(out_dim)
-        W_init, b_init = uniform(stdv), uniform(stdv)
+        # W_init, b_init = uniform(stdv), uniform(stdv)
+        W_init, b_init = glorot_normal(), normal()
+
         # used for the gating function
         W_t = W_init(k1, (input_shape[-1], out_dim))
         b_t = b_init(k2, (out_dim,))
+
         # used for the homogenous representation
         Theta = W_init(k3, (input_shape[-1], out_dim))
+
         # projection used in the outer infusion
         W_h = W_init(k4, (input_shape[-1], out_dim))
-        W_x = W_init(k5, (input_shape[-1], out_dim))
+        # used only in the raw infusion
+        W_x = W_init(k5, (1433, out_dim)) # hardcoded for Cora. should be an arg
+
         return output_shape, (W_t, b_t, Theta, W_h, W_x)
 
     def apply_fun(params, input, adj, **kwargs):
-        # TODO: we need the adj matrix without self loops
-        # raised to power K
-        # TODO: try bias in the projections
-
-        # x, first_x = input
-        x = input
-
+        first_x, x = input # we need the first input for 'raw' infusion
         W_t, b_t, Theta, W_h, W_x = params
+
+        # compute gate
         gate = nn.sigmoid(np.dot(x, W_t) + b_t)
 
         F_hom = np.dot(x, Theta)
-        F_hom = np.matmul(adj, F_hom)
 
         if infusion == 'inner':
-            F_het = np.dot(x, Theta)
+            F_het = F_hom
         elif infusion == 'outer':
-            if x.shape[-1] != W_h.shape[-1]:
-                F_het = np.dot(x, W_h)
-            else:
-                F_het = x
+            F_het = np.dot(x, W_h) if x.shape[-1] != W_h.shape[-1] else x
         elif infusion == 'raw':
             F_het = np.dot(first_x, W_x)
+
+        # k-hop convolution: adj is adj^k without self connections
+        F_hom = np.matmul(adj, F_hom)
+        F_hom = nn.relu(F_hom)
 
         out = gate*F_hom + (1 - gate)*F_het
 
@@ -88,13 +91,13 @@ def GraphHighwayConvolution(out_dim: int, infusion: str = 'inner'):
 
     return init_fun, apply_fun
 
-def GHNet(nhid, nclass, dropout):
+def GHNet(nhid, nclass, dropout, infusion='inner'):
     """
     GHNet implementation.
     """
-    gc1_init, gc1_fun = GraphHighwayConvolution(nhid)
+    gc1_init, gc1_fun = GraphHighwayConvolution(nhid, infusion)
     _, drop_fun = Dropout(dropout)
-    gc2_init, gc2_fun = GraphHighwayConvolution(nclass)
+    gc2_init, gc2_fun = GraphHighwayConvolution(nclass, infusion)
 
     init_funs = [gc1_init, gc2_init]
 
@@ -106,14 +109,13 @@ def GHNet(nhid, nclass, dropout):
             params.append(param)
         return input_shape, params
 
-    def apply_fun(params, x, adj, is_training=False, **kwargs):
+    def apply_fun(params, first_x, adj, is_training=False, **kwargs):
         rng = kwargs.pop('rng', None)
         adj_1, adj_5 = adj
 
-        x = gc1_fun(params[0], x, adj_1, rng=rng) # first conv has 1 hop
-        x = nn.relu(x)
+        x = gc1_fun(params[0], (first_x, first_x), adj_1, rng=rng) # first conv has 1 hop
         x = drop_fun(None, x, is_training=is_training, rng=rng)
-        x = gc2_fun(params[1], x, adj_5, rng=rng)
+        x = gc2_fun(params[1], (first_x, x), adj_5, rng=rng)
         x = nn.log_softmax(x)
         return x
     
