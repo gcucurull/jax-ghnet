@@ -65,7 +65,7 @@ def GraphHighwayConvolution(out_dim: int, orig_n_features: int,
 
         return output_shape, (W_t, b_t, Theta, W_h, W_x)
 
-    def apply_fun(params, input, adj, **kwargs):
+    def apply_fun(params, input, adj, activation=nn.relu, **kwargs):
         first_x, x = input # we need the first input for 'raw' infusion
         W_t, b_t, Theta, W_h, W_x = params
 
@@ -83,7 +83,7 @@ def GraphHighwayConvolution(out_dim: int, orig_n_features: int,
 
         # k-hop convolution: adj is adj^k without self connections
         F_hom = np.matmul(adj, F_hom)
-        F_hom = nn.relu(F_hom)
+        F_hom = activation(F_hom)
 
         out = gate*F_hom + (1 - gate)*F_het
 
@@ -115,7 +115,7 @@ def GHNet(nhid, nclass, dropout, infusion='inner'):
 
         x = gc1_fun(params[0], (first_x, first_x), adj_1, rng=rng) # first conv has 1 hop
         x = drop_fun(None, x, is_training=is_training, rng=rng)
-        x = gc2_fun(params[1], (first_x, x), adj_5, rng=rng)
+        x = gc2_fun(params[1], (first_x, x), adj_5, activation=lambda x: x, rng=rng)
         x = nn.log_softmax(x)
         return x
     
