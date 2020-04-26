@@ -4,7 +4,7 @@ import jax.numpy as np
 from jax import lax, random
 from jax.experimental import stax
 from jax.experimental.stax import Relu, LogSoftmax
-from jax.nn.initializers import glorot_normal, normal, uniform
+from jax.nn.initializers import glorot_normal, normal, glorot_uniform, zeros
 import jax.nn as nn
 
 
@@ -44,12 +44,9 @@ def GraphHighwayConvolution(out_dim: int, orig_n_features: int,
     """
     assert infusion in ('inner', 'outer', 'raw')
     def init_fun(rng, input_shape):
-        # TODO: maybe try glorot
         output_shape = input_shape[:-1] + (out_dim,)
         k1, k2, k3, k4, k5 = random.split(rng, num=5)
-        stdv = 1. / math.sqrt(out_dim)
-        # W_init, b_init = uniform(stdv), uniform(stdv)
-        W_init, b_init = glorot_normal(), normal()
+        W_init, b_init = glorot_uniform(), zeros
 
         # used for the gating function
         W_t = W_init(k1, (input_shape[-1], out_dim))
@@ -111,11 +108,13 @@ def GHNet(nhid, nclass, dropout, infusion='inner'):
 
     def apply_fun(params, first_x, adj, is_training=False, **kwargs):
         rng = kwargs.pop('rng', None)
+        k1, k2, k3, k4 = random.split(rng, 4)
         adj_1, adj_5 = adj
 
-        x = gc1_fun(params[0], (first_x, first_x), adj_1, rng=rng) # first conv has 1 hop
-        x = drop_fun(None, x, is_training=is_training, rng=rng)
-        x = gc2_fun(params[1], (first_x, x), adj_5, activation=lambda x: x, rng=rng)
+        # first_x = drop_fun(None, first_x, is_training=is_training, rng=k1)
+        x = gc1_fun(params[0], (first_x, first_x), adj_1, rng=k2) # first conv has 1 hop
+        x = drop_fun(None, x, is_training=is_training, rng=k3)
+        x = gc2_fun(params[1], (first_x, x), adj_5, activation=lambda x: x, rng=k4)
         x = nn.log_softmax(x)
         return x
     

@@ -9,6 +9,7 @@ from jax.experimental import optimizers
 from utils import load_data
 from models import GHNet
 
+
 @jit
 def loss(params, batch):
     """
@@ -17,7 +18,7 @@ def loss(params, batch):
     inputs, targets, adj, is_training, rng, idx = batch
     preds = predict_fun(params, inputs, adj, is_training=is_training, rng=rng)
     ce_loss = -np.mean(np.sum(preds[idx] * targets[idx], axis=1))
-    l2_loss = 5e-4 * optimizers.l2_norm(params)
+    l2_loss = 5e-4 * optimizers.l2_norm(params)**2 # tf doesn't use sqrt
     return ce_loss + l2_loss
 
 @jit
@@ -27,12 +28,22 @@ def accuracy(params, batch):
     predicted_class = np.argmax(predict_fun(params, inputs, adj, is_training=is_training, rng=rng), axis=1)
     return np.mean(predicted_class[idx] == target_class[idx])
 
+@jit
+def loss_accuracy(params, batch):
+    inputs, targets, adj, is_training, rng, idx = batch
+    preds = predict_fun(params, inputs, adj, is_training=is_training, rng=rng)
+    target_class = np.argmax(targets, axis=1)
+    predicted_class = np.argmax(preds, axis=1)
+    ce_loss = -np.mean(np.sum(preds[idx] * targets[idx], axis=1))
+    acc = np.mean(predicted_class[idx] == target_class[idx])
+    return ce_loss, acc
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--hidden', type=int, default=16)
-    parser.add_argument('--epochs', type=int, default=200)
+    parser.add_argument('--epochs', type=int, default=400)
     parser.add_argument('--dropout', type=float, default=0.1)
     parser.add_argument('--lr', type=float, default=0.01)
     parser.add_argument('--infusion', type=str, default='inner')
@@ -76,14 +87,12 @@ if __name__ == "__main__":
         opt_state = update(epoch, opt_state, batch)
         epoch_time = time.time() - start_time
 
-        if epoch % 5 == 0:
-            params = get_params(opt_state)
-            eval_batch = (features, labels, adj, False, rng_key, idx_val)
-            train_batch = (features, labels, adj, False, rng_key, idx_train)
-            train_loss = loss(params, train_batch)
-            train_acc = accuracy(params, train_batch)
-            val_acc = accuracy(params, eval_batch)
-            print(f"Iter {epoch}/{num_epochs} ({epoch_time:.4f} s) train_loss: {train_loss:.4f}, train_acc: {train_acc:.4f}, val_acc: {val_acc:.4f}")
+        params = get_params(opt_state)
+        eval_batch = (features, labels, adj, False, rng_key, idx_val)
+        train_batch = (features, labels, adj, False, rng_key, idx_train)
+        train_loss, train_acc = loss_accuracy(params, train_batch)
+        val_loss, val_acc = loss_accuracy(params, eval_batch)
+        print(f"Iter {epoch}/{num_epochs} ({epoch_time:.4f} s) train_loss: {train_loss:.4f}, train_acc: {train_acc:.4f}, val_loss: {val_loss:.4f}, val_acc: {val_acc:.4f}")
 
         # new random key at each iteration, othwerwise dropout uses always the same mask 
         rng_key, _ = random.split(rng_key)
