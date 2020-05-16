@@ -1,12 +1,13 @@
 import argparse
 import time
 
+import numpy as onp
 import jax
 import jax.numpy as np
 from jax import jit, grad, random
 from jax.experimental import optimizers
 
-from utils import load_data
+from utils import load_data, to_sparse
 from models import GHNet
 
 
@@ -43,30 +44,42 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--hidden', type=int, default=16)
-    parser.add_argument('--epochs', type=int, default=400)
-    parser.add_argument('--dropout', type=float, default=0.1)
+    parser.add_argument('--epochs', type=int, default=600)
+    parser.add_argument('--dropout', type=float, default=0.15)
     parser.add_argument('--lr', type=float, default=0.01)
     parser.add_argument('--infusion', type=str, default='inner')
+    parser.add_argument('--dataset', type=str, default='cora')
+    parser.add_argument('--sparse', dest='sparse', action='store_true')
+    parser.add_argument('--no-sparse', dest='sparse', action='store_false')
+    parser.set_defaults(sparse=True)
     args = parser.parse_args()
 
     # Load data
-    adj_1, features, labels, idx_train, idx_val, idx_test = load_data()
-    adj_5 = np.linalg.matrix_power(adj_1, 5)
-    adj = (adj_1, adj_5) # 1 hop and 5 hops adj matrices
+    adj_1, features, labels, idx_train, idx_val, idx_test = load_data(args.dataset)
+    adj_3 = onp.linalg.matrix_power(adj_1, 3)
+    adj_5 = onp.linalg.matrix_power(adj_1, 5)
+
+    if args.sparse:
+        adj_1 = to_sparse(adj_1) # custom format
+        adj_3 = to_sparse(adj_3) # custom format
+        adj_5 = to_sparse(adj_5) # custom format
+    
+    adj = (adj_3, adj_3) # the k-hop adj used in each layer
 
     rng_key = random.PRNGKey(args.seed)
     dropout = args.dropout
     step_size = args.lr
     hidden = args.hidden
     num_epochs = args.epochs
-    n_nodes = adj_1.shape[0]
+    n_nodes = features.shape[0]
     n_feats = features.shape[1]
     infusion = args.infusion
 
     init_fun, predict_fun = GHNet(nhid=hidden, 
                                 nclass=labels.shape[1],
                                 dropout=dropout,
-                                infusion=infusion)
+                                infusion=infusion,
+                                sparse=args.sparse)
     input_shape = (-1, n_nodes, n_feats)
     rng_key, init_key = random.split(rng_key)
     _, init_params = init_fun(init_key, input_shape)

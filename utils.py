@@ -101,6 +101,11 @@ def preprocess_adj(adj):
     return adj_normalized
 
 
+def to_sparse(adj):
+    idxes = adj.nonzero()
+    return (idxes, adj[idxes])
+
+
 def load_data(dataset_str: str = 'cora'):
     """
     Loads input data from gcn/data directory
